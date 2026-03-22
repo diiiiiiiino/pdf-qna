@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Q&A Generator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f0f0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 720px;
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #fff;
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 36px;
+        }
+
+        /* Drop Zone */
+        .drop-zone {
+            border: 2px dashed #333;
+            border-radius: 16px;
+            padding: 48px 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #1a1a1a;
+            margin-bottom: 24px;
+        }
+
+        .drop-zone:hover,
+        .drop-zone.dragover {
+            border-color: #6366f1;
+            background: #1e1b4b;
+        }
+
+        .drop-zone.has-file {
+            border-color: #22c55e;
+            background: #052e16;
+        }
+
+        .drop-zone-icon { font-size: 48px; margin-bottom: 12px; }
+        .drop-zone-text { font-size: 16px; color: #aaa; }
+        .drop-zone-text strong { color: #6366f1; }
+
+        .file-name {
+            font-size: 14px;
+            color: #22c55e;
+            margin-top: 8px;
+            word-break: break-all;
+        }
+
+        .file-input { display: none; }
+
+        /* Options */
+        .options {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            margin-bottom: 28px;
+        }
+
+        .option-group label.title {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: #999;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+
+        /* Toggle Switch */
+        .toggle-group {
+            display: flex;
+            background: #1a1a1a;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid #2a2a2a;
+        }
+
+        .toggle-group input[type="radio"] { display: none; }
+
+        .toggle-group label.toggle-btn {
+            flex: 1;
+            padding: 12px 16px;
+            text-align: center;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #888;
+            transition: all 0.2s;
+        }
+
+        .toggle-group input[type="radio"]:checked + label.toggle-btn {
+            background: #6366f1;
+            color: #fff;
+        }
+
+        /* Notion Input */
+        .notion-input {
+            width: 100%;
+            padding: 12px 16px;
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 10px;
+            color: #e0e0e0;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .notion-input:focus { border-color: #6366f1; }
+        .notion-input::placeholder { color: #555; }
+
+        /* Run Button */
+        .run-btn {
+            width: 100%;
+            padding: 14px;
+            background: #6366f1;
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 24px;
+        }
+
+        .run-btn:hover:not(:disabled) {
+            background: #4f46e5;
+            transform: translateY(-1px);
+        }
+
+        .run-btn:disabled {
+            background: #333;
+            color: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .run-btn.running { background: #333; color: #aaa; }
+
+        /* Steps */
+        .steps-section {
+            display: none;
+            margin-bottom: 20px;
+        }
+
+        .steps-section.visible { display: block; }
+
+        .step {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: #1a1a1a;
+            border: 1px solid #222;
+            border-radius: 10px;
+            margin-bottom: 8px;
+            transition: all 0.3s;
+        }
+
+        .step.active {
+            border-color: #6366f1;
+            background: #1e1b4b;
+        }
+
+        .step.done {
+            border-color: #22c55e;
+            background: #052e16;
+        }
+
+        .step-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 700;
+            flex-shrink: 0;
+            background: #333;
+            color: #666;
+            transition: all 0.3s;
+        }
+
+        .step.active .step-icon {
+            background: #6366f1;
+            color: #fff;
+        }
+
+        .step.done .step-icon {
+            background: #22c55e;
+            color: #fff;
+        }
+
+        .step-content { flex: 1; }
+
+        .step-label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            transition: color 0.3s;
+        }
+
+        .step.active .step-label { color: #c7d2fe; }
+        .step.done .step-label { color: #86efac; }
+
+        .step-status {
+            font-size: 12px;
+            color: #555;
+            margin-top: 2px;
+        }
+
+        .step.active .step-status { color: #a5b4fc; }
+        .step.done .step-status { color: #4ade80; }
+
+        .step-time {
+            font-size: 12px;
+            color: #555;
+            font-variant-numeric: tabular-nums;
+            flex-shrink: 0;
+            min-width: 48px;
+            text-align: right;
+        }
+
+        .step.active .step-time { color: #a5b4fc; }
+        .step.done .step-time { color: #4ade80; }
+
+        /* Total time */
+        .total-time {
+            display: none;
+            text-align: center;
+            padding: 10px;
+            margin-bottom: 16px;
+            font-size: 14px;
+            color: #22c55e;
+            background: #052e16;
+            border: 1px solid #166534;
+            border-radius: 10px;
+        }
+
+        .total-time.visible { display: block; }
+
+        .step-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #333;
+            border-top-color: #6366f1;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+
+        .step.active .step-spinner { display: block; }
+
+        .step-check {
+            color: #22c55e;
+            font-size: 16px;
+            display: none;
+        }
+
+        .step.done .step-check { display: block; }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        .step.active .step-status {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        /* Output */
+        .output-section { display: none; }
+        .output-section.visible { display: block; }
+
+        .output-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .output-header h3 {
+            font-size: 13px;
+            font-weight: 600;
+            color: #999;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .output-toggle {
+            font-size: 12px;
+            color: #6366f1;
+            cursor: pointer;
+            margin-left: auto;
+            user-select: none;
+        }
+
+        .output-toggle:hover { color: #818cf8; }
+
+        .output-box {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 12px;
+            padding: 16px;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: #a3e635;
+        }
+
+        .output-box.collapsed { max-height: 0; padding: 0 16px; overflow: hidden; }
+
+        .output-box::-webkit-scrollbar { width: 6px; }
+        .output-box::-webkit-scrollbar-track { background: transparent; }
+        .output-box::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+        .done-badge {
+            display: none;
+            padding: 2px 8px;
+            background: #052e16;
+            color: #22c55e;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .done-badge.visible { display: inline-block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PDF Q&A Generator</h1>
+        <p class="subtitle">PDF를 드래그하여 Q&A 마크다운을 생성하고 Notion에 업로드합니다</p>
+
+        <!-- Drop Zone -->
+        <div class="drop-zone" id="dropZone">
+            <div class="drop-zone-icon">📄</div>
+            <div class="drop-zone-text" id="dropZoneText">
+                PDF 파일을 여기에 <strong>드래그</strong>하거나 <strong>클릭</strong>하여 선택
+            </div>
+            <div class="file-name" id="fileName"></div>
+        </div>
+        <input type="file" class="file-input" id="fileInput" accept=".pdf">
+
+        <!-- Options -->
+        <div class="options">
+            <div class="option-group">
+                <label class="title">생성 모드</label>
+                <div class="toggle-group">
+                    <input type="radio" id="modeSplit" name="mode" value="split" checked>
+                    <label class="toggle-btn" for="modeSplit">챕터별 분리</label>
+                    <input type="radio" id="modeSingle" name="mode" value="single">
+                    <label class="toggle-btn" for="modeSingle">단건 (여러 파일)</label>
+                </div>
+            </div>
+
+            <div class="option-group">
+                <label class="title">Notion 페이지 URL</label>
+                <input type="text" class="notion-input" id="notionUrl"
+                       placeholder="https://www.notion.so/..." required>
+            </div>
+        </div>
+
+        <!-- Run Button -->
+        <button class="run-btn" id="runBtn" disabled>실행</button>
+
+        <!-- Steps Progress -->
+        <div class="steps-section" id="stepsSection">
+            <div class="step" id="step1" data-step="1">
+                <div class="step-icon">1</div>
+                <div class="step-content">
+                    <div class="step-label">PDF 텍스트 추출</div>
+                    <div class="step-status">대기 중</div>
+                </div>
+                <div class="step-time" id="step1Time"></div>
+                <div class="step-spinner"></div>
+                <div class="step-check">&#10003;</div>
+            </div>
+            <div class="step" id="step2" data-step="2">
+                <div class="step-icon">2</div>
+                <div class="step-content">
+                    <div class="step-label">Q&A 생성 + Notion 업로드 (병렬)</div>
+                    <div class="step-status">대기 중</div>
+                </div>
+                <div class="step-time" id="step2Time"></div>
+                <div class="step-spinner"></div>
+                <div class="step-check">&#10003;</div>
+            </div>
+        </div>
+
+        <!-- Total Time -->
+        <div class="total-time" id="totalTime"></div>
+
+        <!-- Output -->
+        <div class="output-section" id="outputSection">
+            <div class="output-header">
+                <h3>실행 로그</h3>
+                <span class="done-badge" id="doneBadge">완료</span>
+                <span class="output-toggle" id="outputToggle">접기</span>
+            </div>
+            <div class="output-box" id="outputBox"></div>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const dropZoneText = document.getElementById('dropZoneText');
+        const fileInput = document.getElementById('fileInput');
+        const fileName = document.getElementById('fileName');
+        const runBtn = document.getElementById('runBtn');
+        const stepsSection = document.getElementById('stepsSection');
+        const outputSection = document.getElementById('outputSection');
+        const outputBox = document.getElementById('outputBox');
+        const doneBadge = document.getElementById('doneBadge');
+        const outputToggle = document.getElementById('outputToggle');
+
+        let selectedFiles = [];
+
+        // 모드 변경 시 파일 입력 속성 및 안내 텍스트 변경
+        document.querySelectorAll('input[name="mode"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                const isSingle = document.getElementById('modeSingle').checked;
+                fileInput.multiple = isSingle;
+                if (isSingle) {
+                    dropZoneText.innerHTML = 'PDF 파일을 여기에 <strong>드래그</strong>하거나 <strong>클릭</strong>하여 선택 (여러 파일 가능)';
+                } else {
+                    dropZoneText.innerHTML = 'PDF 파일을 여기에 <strong>드래그</strong>하거나 <strong>클릭</strong>하여 선택';
+                }
+                // 파일 초기화
+                clearFiles();
+            });
+        });
+
+        // Output toggle
+        outputToggle.addEventListener('click', () => {
+            outputBox.classList.toggle('collapsed');
+            outputToggle.textContent = outputBox.classList.contains('collapsed') ? '펼치기' : '접기';
+        });
+
+        // Drag and Drop
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const isSingle = document.getElementById('modeSingle').checked;
+            const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.pdf'));
+            if (files.length > 0) {
+                if (isSingle) {
+                    setFiles(files);
+                } else {
+                    setFiles([files[0]]);
+                }
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            const files = Array.from(fileInput.files).filter(f => f.name.endsWith('.pdf'));
+            if (files.length > 0) {
+                setFiles(files);
+            }
+        });
+
+        function setFiles(files) {
+            selectedFiles = files;
+            if (files.length === 1) {
+                const f = files[0];
+                fileName.textContent = `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`;
+            } else {
+                const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+                fileName.textContent = `${files.length}개 파일 선택 (총 ${(totalSize / 1024 / 1024).toFixed(1)} MB)`;
+            }
+            dropZone.classList.add('has-file');
+            updateRunBtn();
+        }
+
+        function clearFiles() {
+            selectedFiles = [];
+            fileInput.value = '';
+            fileName.textContent = '';
+            dropZone.classList.remove('has-file');
+            updateRunBtn();
+        }
+
+        function updateRunBtn() {
+            const hasFile = selectedFiles.length > 0;
+            const hasNotion = document.getElementById('notionUrl').value.trim() !== '';
+            runBtn.disabled = !(hasFile && hasNotion);
+        }
+
+        document.getElementById('notionUrl').addEventListener('input', updateRunBtn);
+
+        // Step management
+        const stepTimers = {};
+        let totalStartTime = null;
+        let elapsedIntervals = {};
+
+        function formatDuration(ms) {
+            const s = Math.floor(ms / 1000);
+            if (s < 60) return s + '초';
+            const m = Math.floor(s / 60);
+            const rs = s % 60;
+            return m + '분 ' + rs + '초';
+        }
+
+        function resetSteps() {
+            Object.values(elapsedIntervals).forEach(clearInterval);
+            elapsedIntervals = {};
+            totalStartTime = null;
+
+            document.querySelectorAll('.step').forEach(el => {
+                el.classList.remove('active', 'done');
+                el.querySelector('.step-status').textContent = '대기 중';
+            });
+            document.querySelectorAll('.step-time').forEach(el => el.textContent = '');
+
+            const totalEl = document.getElementById('totalTime');
+            totalEl.classList.remove('visible');
+            totalEl.textContent = '';
+        }
+
+        function startElapsedTimer(stepNum) {
+            const timeEl = document.getElementById('step' + stepNum + 'Time');
+            if (!timeEl) return;
+            const start = Date.now();
+            timeEl.textContent = '0초';
+            elapsedIntervals[stepNum] = setInterval(() => {
+                timeEl.textContent = formatDuration(Date.now() - start);
+            }, 1000);
+        }
+
+        function stopElapsedTimer(stepNum) {
+            if (elapsedIntervals[stepNum]) {
+                clearInterval(elapsedIntervals[stepNum]);
+                delete elapsedIntervals[stepNum];
+            }
+        }
+
+        function setStepActive(stepNum, label) {
+            const el = document.getElementById('step' + stepNum);
+            if (!el || el.classList.contains('active')) return;
+            el.classList.remove('done');
+            el.classList.add('active');
+            el.querySelector('.step-status').textContent = label + ' 실행 중...';
+            stepTimers[stepNum] = Date.now();
+            if (!totalStartTime) totalStartTime = Date.now();
+            startElapsedTimer(stepNum);
+        }
+
+        function setStepDone(stepNum, serverTime) {
+            const el = document.getElementById('step' + stepNum);
+            if (!el || el.classList.contains('done')) return;
+            el.classList.remove('active');
+            el.classList.add('done');
+
+            stopElapsedTimer(stepNum);
+            const timeEl = document.getElementById('step' + stepNum + 'Time');
+            if (timeEl) {
+                if (serverTime) {
+                    // 서버에서 전달된 소요 시간 사용
+                    timeEl.textContent = serverTime;
+                } else {
+                    const elapsed = stepTimers[stepNum] ? Date.now() - stepTimers[stepNum] : 0;
+                    timeEl.textContent = formatDuration(elapsed);
+                }
+            }
+
+            el.querySelector('.step-status').textContent = '완료';
+        }
+
+        function showTotalTime(serverTime) {
+            const totalEl = document.getElementById('totalTime');
+            if (serverTime) {
+                totalEl.textContent = '총 소요 시간: ' + serverTime;
+            } else if (totalStartTime) {
+                totalEl.textContent = '총 소요 시간: ' + formatDuration(Date.now() - totalStartTime);
+            } else {
+                return;
+            }
+            totalEl.classList.add('visible');
+        }
+
+        function parseSteps(output) {
+            const lines = output.split('\n');
+            for (const line of lines) {
+                const startMatch = line.match(/\[STEP:(\d+):START\]\s*(.*)/);
+                const doneMatch = line.match(/\[STEP:(\d+):DONE\]\s*(?:\((.+?)\))?/);
+                const allDone = line.match(/\[STEP:ALL:DONE\]\s*(?:\((.+?)\))?/);
+
+                if (startMatch) {
+                    setStepActive(parseInt(startMatch[1]), startMatch[2]);
+                }
+                if (doneMatch) {
+                    setStepDone(parseInt(doneMatch[1]), doneMatch[2] || null);
+                }
+                if (allDone) {
+                    showTotalTime(allDone[1] || null);
+                }
+            }
+        }
+
+        function cleanOutput(text) {
+            return text.replace(/\[STEP:\w+:(START|DONE)\].*\n?/g, '');
+        }
+
+        // Run
+        runBtn.addEventListener('click', async () => {
+            if (selectedFiles.length === 0) return;
+
+            runBtn.disabled = true;
+            runBtn.classList.add('running');
+            runBtn.textContent = '실행 중...';
+
+            stepsSection.classList.add('visible');
+            resetSteps();
+
+            outputSection.classList.add('visible');
+            outputBox.textContent = '';
+            outputBox.classList.remove('collapsed');
+            outputToggle.textContent = '접기';
+            doneBadge.classList.remove('visible');
+
+            const mode = document.querySelector('input[name="mode"]:checked').value;
+            const notionUrl = document.getElementById('notionUrl').value;
+
+            const formData = new FormData();
+            for (const file of selectedFiles) {
+                formData.append('file', file);
+            }
+            formData.append('mode', mode);
+            formData.append('notionUrl', notionUrl);
+
+            try {
+                const res = await fetch('/api/run', { method: 'POST', body: formData });
+                const data = await res.json();
+
+                if (data.error) {
+                    outputBox.textContent = '오류: ' + data.error;
+                    finish();
+                    return;
+                }
+
+                pollOutput(data.jobId);
+            } catch (err) {
+                outputBox.textContent = '오류: ' + err.message;
+                finish();
+            }
+        });
+
+        function pollOutput(jobId) {
+            const interval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/output/${jobId}`);
+                    const data = await res.json();
+
+                    parseSteps(data.output);
+                    outputBox.textContent = cleanOutput(data.output);
+                    outputBox.scrollTop = outputBox.scrollHeight;
+
+                    if (data.done) {
+                        clearInterval(interval);
+                        finish();
+                    }
+                } catch {
+                    clearInterval(interval);
+                    finish();
+                }
+            }, 1000);
+        }
+
+        function finish() {
+            doneBadge.classList.add('visible');
+            runBtn.classList.remove('running');
+            runBtn.textContent = '실행';
+
+            // 파일 선택 초기화
+            selectedFiles = [];
+            fileInput.value = '';
+            fileName.textContent = '';
+            dropZone.classList.remove('has-file');
+            runBtn.disabled = true;
+        }
+    </script>
+</body>
+</html>

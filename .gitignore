@@ -1,0 +1,17 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+
+# Output
+out/
+
+# Generated QnA results (numbered chapter folders)
+[0-9]*/
+
+# OS
+.DS_Store
