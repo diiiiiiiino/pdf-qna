@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export CLAUDE_CONFIG_DIR="$HOME/.claude-personal"
+
 # 사용법 출력
 usage() {
-    echo "사용법: ./run.sh --notion <URL> [--single] <pdf파일경로...>"
+    echo "사용법: ./run.sh [--notion <URL> | --md [--md-dir <경로>]] [--single] <pdf파일경로...>"
     echo ""
-    echo "필수:"
-    echo "  --notion <URL>    Notion 페이지 URL"
+    echo "출력 (하나 이상 필수):"
+    echo "  --notion <URL>    Notion 페이지 URL에 업로드"
+    echo "  --md              로컬 마크다운 파일로 생성"
+    echo "  --md-dir <경로>   MD 파일 출력 디렉토리 (기본: out/{PDF명}_qna/)"
     echo ""
     echo "옵션:"
     echo "  --single          단건 모드 (여러 PDF 가능, 기본: 챕터별 분리)"
@@ -19,6 +23,8 @@ fi
 
 # 인자 파싱
 NOTION_PAGE=""
+MD_MODE="false"
+MD_DIR_CUSTOM=""
 SPLIT_MODE="split"
 PDF_PATHS=()
 
@@ -36,6 +42,18 @@ while [ $# -gt 0 ]; do
             NOTION_PAGE="$2"
             shift 2
             ;;
+        --md)
+            MD_MODE="true"
+            shift
+            ;;
+        --md-dir)
+            if [ -z "${2:-}" ]; then
+                echo "오류: --md-dir 뒤에 경로를 지정해주세요."
+                exit 1
+            fi
+            MD_DIR_CUSTOM="$2"
+            shift 2
+            ;;
         --help|-h)
             usage
             ;;
@@ -51,8 +69,8 @@ if [ ${#PDF_PATHS[@]} -eq 0 ]; then
     usage
 fi
 
-if [ -z "$NOTION_PAGE" ]; then
-    echo "오류: --notion <URL> 옵션은 필수입니다."
+if [ -z "$NOTION_PAGE" ] && [ "$MD_MODE" = "false" ]; then
+    echo "오류: --notion <URL> 또는 --md 옵션 중 하나 이상을 지정해주세요."
     usage
 fi
 
@@ -76,7 +94,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUT_DIR="out"
 
 TOTAL_START=$(date +%s)
-log "모드: ${SPLIT_MODE} ($([ "$SPLIT_MODE" = "split" ] && echo "챕터별 분리" || echo "단건 ${#PDF_PATHS[@]}개"))"
+OUTPUT_TARGET=""
+[ -n "$NOTION_PAGE" ] && OUTPUT_TARGET="Notion"
+[ "$MD_MODE" = "true" ] && OUTPUT_TARGET="${OUTPUT_TARGET:+${OUTPUT_TARGET} + }MD파일"
+log "모드: ${SPLIT_MODE} ($([ "$SPLIT_MODE" = "split" ] && echo "챕터별 분리" || echo "단건 ${#PDF_PATHS[@]}개")) → ${OUTPUT_TARGET}"
 log "파일: ${PDF_PATHS[*]}"
 echo ""
 
@@ -108,45 +129,104 @@ PDF_PATHS=("${VALID_PDFS[@]}")
 
 echo "[STEP:1:DONE] ($(elapsed "$STEP1_START"))"
 
-# ===== Step 2: Q&A 생성 + Notion 업로드 =====
+# ===== Step 2: Q&A 생성 =====
 STEP2_START=$(date +%s)
-echo "[STEP:2:START] Q&A 생성 + Notion 업로드"
+
+STEP2_LABEL="Q&A 생성"
+[ -n "$NOTION_PAGE" ] && STEP2_LABEL="${STEP2_LABEL} + Notion 업로드"
+[ "$MD_MODE" = "true" ] && STEP2_LABEL="${STEP2_LABEL} + MD 파일 생성"
+echo "[STEP:2:START] ${STEP2_LABEL}"
 
 PIDS=()
 
-if [ "$SPLIT_MODE" = "split" ]; then
-    PDF_PATH="${PDF_PATHS[0]}"
-    BASENAME="$(basename "$PDF_PATH" .pdf)"
-    EXTRACTED="${SCRIPT_DIR}/${OUT_DIR}/${BASENAME}.md"
+# --- Notion 업로드 ---
+if [ -n "$NOTION_PAGE" ]; then
+    if [ "$SPLIT_MODE" = "split" ]; then
+        PDF_PATH="${PDF_PATHS[0]}"
+        BASENAME="$(basename "$PDF_PATH" .pdf)"
+        EXTRACTED="${SCRIPT_DIR}/${OUT_DIR}/${BASENAME}.md"
 
-    log "챕터별 QnA 생성 + Notion 업로드 시작 (서브에이전트 병렬 방식)"
-    (
-        echo "/qna
+        log "챕터별 QnA 생성 + Notion 업로드 시작 (서브에이전트 병렬 방식)"
+        (
+            echo "/qna
 
 [대상 파일]
 ${EXTRACTED}
 
 [Notion 페이지]
 ${NOTION_PAGE}" | claude -p --model sonnet --dangerously-skip-permissions
-    ) &
-    PIDS+=($!)
-else
-    for pdf in "${PDF_PATHS[@]}"; do
-        BASENAME="$(basename "$pdf" .pdf)"
-        EXTRACTED="${SCRIPT_DIR}/${OUT_DIR}/${BASENAME}.md"
-        EXTRACTED_CONTENT="$(cat "$EXTRACTED")"
-        (
-            echo "/qna-single
+        ) &
+        PIDS+=($!)
+    else
+        for pdf in "${PDF_PATHS[@]}"; do
+            BASENAME="$(basename "$pdf" .pdf)"
+            EXTRACTED="${SCRIPT_DIR}/${OUT_DIR}/${BASENAME}.md"
+            EXTRACTED_CONTENT="$(cat "$EXTRACTED")"
+            (
+                echo "/qna-single
 
 [문서 내용]
 ${EXTRACTED_CONTENT}
 
 [Notion 페이지]
 ${NOTION_PAGE}" | claude -p --model sonnet --dangerously-skip-permissions
+            ) &
+            PIDS+=($!)
+            log "  Notion 시작: $(basename "$pdf")"
+        done
+    fi
+fi
+
+# --- MD 파일 생성 ---
+if [ "$MD_MODE" = "true" ]; then
+    if [ "$SPLIT_MODE" = "split" ]; then
+        PDF_PATH="${PDF_PATHS[0]}"
+        BASENAME="$(basename "$PDF_PATH" .pdf)"
+        EXTRACTED="${SCRIPT_DIR}/${OUT_DIR}/${BASENAME}.md"
+        if [ -n "$MD_DIR_CUSTOM" ]; then
+            MD_OUT_DIR="$MD_DIR_CUSTOM"
+        else
+            MD_OUT_DIR="${SCRIPT_DIR}/${OUT_DIR}/${BASENAME}_qna"
+        fi
+        mkdir -p "$MD_OUT_DIR"
+
+        log "챕터별 QnA MD 파일 생성 시작 (서브에이전트 병렬 방식)"
+        log "출력 디렉토리: ${MD_OUT_DIR}"
+        (
+            echo "/qna-md
+
+[대상 파일]
+${EXTRACTED}
+
+[출력 디렉토리]
+${MD_OUT_DIR}" | claude -p --model sonnet --dangerously-skip-permissions
         ) &
         PIDS+=($!)
-        log "  시작: $(basename "$pdf")"
-    done
+    else
+        for pdf in "${PDF_PATHS[@]}"; do
+            BASENAME="$(basename "$pdf" .pdf)"
+            EXTRACTED="${SCRIPT_DIR}/${OUT_DIR}/${BASENAME}.md"
+            EXTRACTED_CONTENT="$(cat "$EXTRACTED")"
+            if [ -n "$MD_DIR_CUSTOM" ]; then
+                MD_OUT_DIR="$MD_DIR_CUSTOM"
+            else
+                MD_OUT_DIR="${SCRIPT_DIR}/${OUT_DIR}/${BASENAME}_qna"
+            fi
+            mkdir -p "$MD_OUT_DIR"
+            MD_OUT_FILE="${MD_OUT_DIR}/${BASENAME}_QnA.md"
+            (
+                echo "/qna-single-md
+
+[문서 내용]
+${EXTRACTED_CONTENT}
+
+[출력 파일]
+${MD_OUT_FILE}" | claude -p --model sonnet --dangerously-skip-permissions
+            ) &
+            PIDS+=($!)
+            log "  MD 시작: $(basename "$pdf") → ${MD_OUT_DIR}"
+        done
+    fi
 fi
 
 # 모든 병렬 작업 완료 대기

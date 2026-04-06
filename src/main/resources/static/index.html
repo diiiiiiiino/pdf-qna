@@ -352,12 +352,73 @@
         }
 
         .done-badge.visible { display: inline-block; }
+
+        /* Download Section */
+        .download-section {
+            display: none;
+            margin-bottom: 20px;
+        }
+
+        .download-section.visible { display: block; }
+
+        .download-section h3 {
+            font-size: 13px;
+            font-weight: 600;
+            color: #999;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        .download-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .download-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            text-decoration: none;
+            color: #e0e0e0;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .download-item:hover {
+            border-color: #6366f1;
+            background: #1e1b4b;
+        }
+
+        .download-item .dl-icon {
+            color: #6366f1;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+
+        .download-item .dl-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .download-item .dl-badge {
+            font-size: 11px;
+            color: #888;
+            flex-shrink: 0;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>PDF Q&A Generator</h1>
-        <p class="subtitle">PDF를 드래그하여 Q&A 마크다운을 생성하고 Notion에 업로드합니다</p>
+        <p class="subtitle">PDF를 드래그하여 Q&A 마크다운을 생성합니다</p>
 
         <!-- Drop Zone -->
         <div class="drop-zone" id="dropZone">
@@ -382,9 +443,27 @@
             </div>
 
             <div class="option-group">
+                <label class="title">출력 방식</label>
+                <div class="toggle-group">
+                    <input type="radio" id="outputNotion" name="outputType" value="notion" checked>
+                    <label class="toggle-btn" for="outputNotion">Notion 업로드</label>
+                    <input type="radio" id="outputMd" name="outputType" value="md">
+                    <label class="toggle-btn" for="outputMd">MD 파일</label>
+                    <input type="radio" id="outputBoth" name="outputType" value="both">
+                    <label class="toggle-btn" for="outputBoth">둘 다</label>
+                </div>
+            </div>
+
+            <div class="option-group" id="notionGroup">
                 <label class="title">Notion 페이지 URL</label>
                 <input type="text" class="notion-input" id="notionUrl"
-                       placeholder="https://www.notion.so/..." required>
+                       placeholder="https://www.notion.so/...">
+            </div>
+
+            <div class="option-group" id="mdDirGroup" style="display: none;">
+                <label class="title">MD 출력 디렉토리</label>
+                <input type="text" class="notion-input" id="mdOutDir"
+                       placeholder="비워두면 기본 경로 (out/{PDF명}_qna/)">
             </div>
         </div>
 
@@ -406,7 +485,7 @@
             <div class="step" id="step2" data-step="2">
                 <div class="step-icon">2</div>
                 <div class="step-content">
-                    <div class="step-label">Q&A 생성 + Notion 업로드 (병렬)</div>
+                    <div class="step-label" id="step2Label">Q&A 생성 + Notion 업로드 (병렬)</div>
                     <div class="step-status">대기 중</div>
                 </div>
                 <div class="step-time" id="step2Time"></div>
@@ -417,6 +496,12 @@
 
         <!-- Total Time -->
         <div class="total-time" id="totalTime"></div>
+
+        <!-- Download Section -->
+        <div class="download-section" id="downloadSection">
+            <h3>생성된 MD 파일</h3>
+            <div class="download-list" id="downloadList"></div>
+        </div>
 
         <!-- Output -->
         <div class="output-section" id="outputSection">
@@ -442,6 +527,7 @@
         const outputToggle = document.getElementById('outputToggle');
 
         let selectedFiles = [];
+        let currentJobId = null;
 
         // 모드 변경 시 파일 입력 속성 및 안내 텍스트 변경
         document.querySelectorAll('input[name="mode"]').forEach(radio => {
@@ -456,6 +542,31 @@
                 // 파일 초기화
                 clearFiles();
             });
+        });
+
+        // 출력 방식 변경 시 Notion URL 표시/숨김
+        function updateOutputType() {
+            const outputType = document.querySelector('input[name="outputType"]:checked').value;
+            const notionGroup = document.getElementById('notionGroup');
+            const mdDirGroup = document.getElementById('mdDirGroup');
+            const step2Label = document.getElementById('step2Label');
+            if (outputType === 'md') {
+                notionGroup.style.display = 'none';
+                mdDirGroup.style.display = 'block';
+                step2Label.textContent = 'Q&A 생성 + MD 파일 저장 (병렬)';
+            } else if (outputType === 'both') {
+                notionGroup.style.display = 'block';
+                mdDirGroup.style.display = 'block';
+                step2Label.textContent = 'Q&A 생성 + Notion 업로드 + MD 파일 저장 (병렬)';
+            } else {
+                notionGroup.style.display = 'block';
+                mdDirGroup.style.display = 'none';
+                step2Label.textContent = 'Q&A 생성 + Notion 업로드 (병렬)';
+            }
+            updateRunBtn();
+        }
+        document.querySelectorAll('input[name="outputType"]').forEach(radio => {
+            radio.addEventListener('change', updateOutputType);
         });
 
         // Output toggle
@@ -520,8 +631,10 @@
 
         function updateRunBtn() {
             const hasFile = selectedFiles.length > 0;
+            const outputType = document.querySelector('input[name="outputType"]:checked').value;
+            const needsNotion = outputType === 'notion' || outputType === 'both';
             const hasNotion = document.getElementById('notionUrl').value.trim() !== '';
-            runBtn.disabled = !(hasFile && hasNotion);
+            runBtn.disabled = !(hasFile && (!needsNotion || hasNotion));
         }
 
         document.getElementById('notionUrl').addEventListener('input', updateRunBtn);
@@ -656,15 +769,25 @@
             outputToggle.textContent = '접기';
             doneBadge.classList.remove('visible');
 
+            document.getElementById('downloadSection').classList.remove('visible');
+            document.getElementById('downloadList').innerHTML = '';
+
             const mode = document.querySelector('input[name="mode"]:checked').value;
+            const outputType = document.querySelector('input[name="outputType"]:checked').value;
             const notionUrl = document.getElementById('notionUrl').value;
 
             const formData = new FormData();
             for (const file of selectedFiles) {
                 formData.append('file', file);
             }
+            const mdOutDir = document.getElementById('mdOutDir').value.trim();
+
             formData.append('mode', mode);
+            formData.append('outputType', outputType);
             formData.append('notionUrl', notionUrl);
+            if (mdOutDir) {
+                formData.append('mdOutDir', mdOutDir);
+            }
 
             try {
                 const res = await fetch('/api/run', { method: 'POST', body: formData });
@@ -676,6 +799,7 @@
                     return;
                 }
 
+                currentJobId = data.jobId;
                 pollOutput(data.jobId);
             } catch (err) {
                 outputBox.textContent = '오류: ' + err.message;
@@ -695,6 +819,9 @@
 
                     if (data.done) {
                         clearInterval(interval);
+                        if (data.useMd) {
+                            await fetchDownloadFiles(jobId);
+                        }
                         finish();
                     }
                 } catch {
@@ -702,6 +829,28 @@
                     finish();
                 }
             }, 1000);
+        }
+
+        async function fetchDownloadFiles(jobId) {
+            try {
+                const res = await fetch(`/api/files/${jobId}`);
+                const data = await res.json();
+                if (data.files && data.files.length > 0) {
+                    const downloadList = document.getElementById('downloadList');
+                    downloadList.innerHTML = '';
+                    for (const file of data.files) {
+                        const a = document.createElement('a');
+                        a.className = 'download-item';
+                        a.href = `/api/download?path=${encodeURIComponent(file.path)}`;
+                        a.download = file.name;
+                        a.innerHTML = `<span class="dl-icon">&#8595;</span><span class="dl-name">${file.name}</span><span class="dl-badge">MD</span>`;
+                        downloadList.appendChild(a);
+                    }
+                    document.getElementById('downloadSection').classList.add('visible');
+                }
+            } catch (e) {
+                console.error('파일 목록 조회 실패:', e);
+            }
         }
 
         function finish() {
