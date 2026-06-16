@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF Q&A Generator</title>
+    <title>PDF Q&A / Summary Generator</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -413,14 +413,145 @@
             color: #888;
             flex-shrink: 0;
         }
+
+        /* MD Picker */
+        .md-picker { display: none; margin-bottom: 24px; }
+        .md-picker.visible { display: block; }
+
+        .md-search {
+            width: 100%;
+            padding: 10px 14px;
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 10px;
+            color: #e0e0e0;
+            font-size: 14px;
+            outline: none;
+            margin-bottom: 10px;
+        }
+        .md-search:focus { border-color: #6366f1; }
+        .md-search::placeholder { color: #555; }
+
+        .md-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 8px;
+        }
+        .md-toolbar .md-actions { display: flex; gap: 12px; }
+        .md-toolbar a {
+            color: #6366f1;
+            cursor: pointer;
+            user-select: none;
+        }
+        .md-toolbar a:hover { color: #818cf8; }
+
+        .md-list {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 12px;
+            max-height: 380px;
+            overflow-y: auto;
+        }
+
+        .md-category-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 14px;
+            background: #161616;
+            border-top: 1px solid #1c1c1c;
+            border-bottom: 1px solid #1c1c1c;
+            cursor: pointer;
+            user-select: none;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        .md-category-header:first-child { border-top: none; }
+        .md-category-header:hover { background: #1a1a1a; }
+        .md-category-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: #a5b4fc;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+        .md-category-count {
+            font-size: 11px;
+            color: #666;
+        }
+        .md-category.collapsed .md-category-body { display: none; }
+        .md-category-caret {
+            display: inline-block;
+            margin-right: 6px;
+            transition: transform 0.15s;
+        }
+        .md-category.collapsed .md-category-caret { transform: rotate(-90deg); }
+        .md-list::-webkit-scrollbar { width: 6px; }
+        .md-list::-webkit-scrollbar-track { background: transparent; }
+        .md-list::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+        .md-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            border-bottom: 1px solid #1c1c1c;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .md-item:last-child { border-bottom: none; }
+        .md-item:hover { background: #1a1a1a; }
+        .md-item.selected { background: #1e1b4b; }
+
+        .md-item input[type="checkbox"],
+        .md-item input[type="radio"] {
+            accent-color: #6366f1;
+            margin: 0;
+        }
+
+        .md-item .md-name {
+            flex: 1;
+            font-size: 14px;
+            color: #e0e0e0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .md-item .md-meta {
+            font-size: 11px;
+            color: #666;
+            flex-shrink: 0;
+        }
+
+        .md-empty {
+            text-align: center;
+            padding: 24px;
+            color: #666;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>PDF Q&A Generator</h1>
-        <p class="subtitle">PDF를 드래그하여 Q&A 마크다운을 생성합니다</p>
+        <h1>PDF Q&A / Summary Generator</h1>
+        <p class="subtitle">PDF를 드래그하거나 이미 변환된 MD 파일을 선택하여 작업을 실행합니다</p>
 
-        <!-- Drop Zone -->
+        <!-- Input Source Toggle -->
+        <div class="option-group" style="margin-bottom: 20px;">
+            <label class="title">입력 방식</label>
+            <div class="toggle-group">
+                <input type="radio" id="sourcePdf" name="inputMode" value="pdf" checked>
+                <label class="toggle-btn" for="sourcePdf">PDF 업로드</label>
+                <input type="radio" id="sourceMd" name="inputMode" value="md">
+                <label class="toggle-btn" for="sourceMd">기존 변환본 사용</label>
+            </div>
+        </div>
+
+        <!-- Drop Zone (PDF 모드) -->
         <div class="drop-zone" id="dropZone">
             <div class="drop-zone-icon">📄</div>
             <div class="drop-zone-text" id="dropZoneText">
@@ -430,8 +561,38 @@
         </div>
         <input type="file" class="file-input" id="fileInput" accept=".pdf">
 
+        <!-- MD Picker (MD 모드) -->
+        <div class="md-picker" id="mdPicker">
+            <input type="text" class="md-search" id="mdSearch" placeholder="파일명 검색...">
+            <div class="md-toolbar">
+                <span id="mdSelectedInfo">0개 선택</span>
+                <div class="md-actions">
+                    <a id="mdSelectAll">전체 선택</a>
+                    <a id="mdClearAll">선택 해제</a>
+                    <a id="mdReload">새로고침</a>
+                </div>
+            </div>
+            <div class="md-list" id="mdList">
+                <div class="md-empty">불러오는 중...</div>
+            </div>
+        </div>
+
         <!-- Options -->
         <div class="options">
+            <div class="option-group">
+                <label class="title">작업 유형</label>
+                <div class="toggle-group">
+                    <input type="radio" id="taskQna" name="taskType" value="qna" checked>
+                    <label class="toggle-btn" for="taskQna">Q&A</label>
+                    <input type="radio" id="taskSummary" name="taskType" value="summary">
+                    <label class="toggle-btn" for="taskSummary">요약</label>
+                    <input type="radio" id="taskConvert" name="taskType" value="convert">
+                    <label class="toggle-btn" for="taskConvert">원문 변환</label>
+                    <input type="radio" id="taskDeck" name="taskType" value="deck">
+                    <label class="toggle-btn" for="taskDeck">덱</label>
+                </div>
+            </div>
+
             <div class="option-group">
                 <label class="title">생성 모드</label>
                 <div class="toggle-group">
@@ -463,7 +624,7 @@
             <div class="option-group" id="mdDirGroup" style="display: none;">
                 <label class="title">MD 출력 디렉토리</label>
                 <input type="text" class="notion-input" id="mdOutDir"
-                       placeholder="비워두면 기본 경로 (out/{PDF명}_qna/)">
+                       placeholder="비워두면 기본 경로 (out/{PDF명}_{작업유형}/)">
             </div>
         </div>
 
@@ -475,7 +636,7 @@
             <div class="step" id="step1" data-step="1">
                 <div class="step-icon">1</div>
                 <div class="step-content">
-                    <div class="step-label">PDF 텍스트 추출</div>
+                    <div class="step-label" id="step1Label">PDF 텍스트 추출 / OCR</div>
                     <div class="step-status">대기 중</div>
                 </div>
                 <div class="step-time" id="step1Time"></div>
@@ -528,6 +689,35 @@
 
         let selectedFiles = [];
         let currentJobId = null;
+        let convertedFiles = [];      // 서버에서 로드한 기존 MD 목록 ({name, relPath, category, ...})
+        let selectedMdPaths = [];     // 사용자가 고른 MD 상대 경로 목록
+        let collapsedCategories = new Set();
+
+        const mdPicker = document.getElementById('mdPicker');
+        const mdList = document.getElementById('mdList');
+        const mdSearch = document.getElementById('mdSearch');
+        const mdSelectedInfo = document.getElementById('mdSelectedInfo');
+        const step1Label = document.getElementById('step1Label');
+
+        function isMdMode() {
+            return document.getElementById('sourceMd').checked;
+        }
+
+        // 입력 방식 토글
+        document.querySelectorAll('input[name="inputMode"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                const mdMode = isMdMode();
+                dropZone.style.display = mdMode ? 'none' : 'block';
+                mdPicker.classList.toggle('visible', mdMode);
+                step1Label.textContent = mdMode ? '기존 MD 사용 (추출 스킵)' : 'PDF 텍스트 추출 / OCR';
+                clearFiles();
+                selectedMdPaths = [];
+                if (mdMode) {
+                    loadConvertedFiles();
+                }
+                updateRunBtn();
+            });
+        });
 
         // 모드 변경 시 파일 입력 속성 및 안내 텍스트 변경
         document.querySelectorAll('input[name="mode"]').forEach(radio => {
@@ -541,31 +731,183 @@
                 }
                 // 파일 초기화
                 clearFiles();
+                selectedMdPaths = [];
+                renderMdList();
+                updateRunBtn();
             });
         });
 
-        // 출력 방식 변경 시 Notion URL 표시/숨김
+        async function loadConvertedFiles() {
+            mdList.innerHTML = '<div class="md-empty">불러오는 중...</div>';
+            try {
+                const res = await fetch('/api/converted');
+                const data = await res.json();
+                convertedFiles = data.files || [];
+            } catch (e) {
+                convertedFiles = [];
+                mdList.innerHTML = '<div class="md-empty">목록을 불러올 수 없습니다.</div>';
+                return;
+            }
+            // 처음 로드 시 모든 카테고리를 접힌 상태로 시작
+            collapsedCategories = new Set(
+                convertedFiles.map(f => f.category || '(미분류)')
+            );
+            renderMdList();
+        }
+
+        function formatSize(bytes) {
+            if (!bytes) return '';
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+        }
+
+        function escapeHtml(s) {
+            return s.replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+        }
+
+        function renderMdList() {
+            if (convertedFiles.length === 0) {
+                mdList.innerHTML = '<div class="md-empty">변환된 MD 파일이 없습니다. PDF 업로드 후 다시 시도하세요.</div>';
+                mdSelectedInfo.textContent = '0개 선택';
+                return;
+            }
+            const q = mdSearch.value.trim().toLowerCase();
+            const filtered = q
+                ? convertedFiles.filter(f =>
+                    f.name.toLowerCase().includes(q) ||
+                    (f.category && f.category.toLowerCase().includes(q)))
+                : convertedFiles;
+            if (filtered.length === 0) {
+                mdList.innerHTML = '<div class="md-empty">일치하는 파일이 없습니다.</div>';
+                mdSelectedInfo.textContent = selectedMdPaths.length + '개 선택';
+                return;
+            }
+            const multi = document.getElementById('modeSingle').checked;
+            const inputType = multi ? 'checkbox' : 'radio';
+
+            // 카테고리별 그룹화 (순서 유지)
+            const groups = new Map();
+            for (const f of filtered) {
+                const key = f.category || '(미분류)';
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(f);
+            }
+
+            mdList.innerHTML = '';
+            for (const [category, items] of groups.entries()) {
+                const isCollapsed = collapsedCategories.has(category) && !q;
+                const section = document.createElement('div');
+                section.className = 'md-category' + (isCollapsed ? ' collapsed' : '');
+
+                const header = document.createElement('div');
+                header.className = 'md-category-header';
+                header.innerHTML =
+                    '<span class="md-category-name"><span class="md-category-caret">&#9662;</span>' +
+                    escapeHtml(category) + '</span>' +
+                    '<span class="md-category-count">' + items.length + '개</span>';
+                header.addEventListener('click', () => {
+                    if (collapsedCategories.has(category)) {
+                        collapsedCategories.delete(category);
+                    } else {
+                        collapsedCategories.add(category);
+                    }
+                    renderMdList();
+                });
+                section.appendChild(header);
+
+                const body = document.createElement('div');
+                body.className = 'md-category-body';
+                for (const f of items) {
+                    const checked = selectedMdPaths.includes(f.relPath);
+                    const row = document.createElement('label');
+                    row.className = 'md-item' + (checked ? ' selected' : '');
+                    row.innerHTML =
+                        '<input type="' + inputType + '" name="mdPick" ' +
+                        (checked ? 'checked' : '') +
+                        ' data-relpath="' + encodeURIComponent(f.relPath) + '">' +
+                        '<span class="md-name">' + escapeHtml(f.name) + '</span>' +
+                        '<span class="md-meta">' + formatSize(f.size) + '</span>';
+                    const input = row.querySelector('input');
+                    input.addEventListener('change', () => {
+                        const rp = decodeURIComponent(input.dataset.relpath);
+                        if (multi) {
+                            if (input.checked) {
+                                if (!selectedMdPaths.includes(rp)) selectedMdPaths.push(rp);
+                            } else {
+                                selectedMdPaths = selectedMdPaths.filter(x => x !== rp);
+                            }
+                        } else {
+                            selectedMdPaths = input.checked ? [rp] : [];
+                        }
+                        renderMdList();
+                        updateRunBtn();
+                    });
+                    body.appendChild(row);
+                }
+                section.appendChild(body);
+                mdList.appendChild(section);
+            }
+            mdSelectedInfo.textContent = selectedMdPaths.length + '개 선택';
+        }
+
+        mdSearch.addEventListener('input', renderMdList);
+        document.getElementById('mdReload').addEventListener('click', loadConvertedFiles);
+        document.getElementById('mdSelectAll').addEventListener('click', () => {
+            const multi = document.getElementById('modeSingle').checked;
+            if (!multi) return; // split 모드에서는 1개만
+            const q = mdSearch.value.trim().toLowerCase();
+            const visible = q
+                ? convertedFiles.filter(f =>
+                    f.name.toLowerCase().includes(q) ||
+                    (f.category && f.category.toLowerCase().includes(q)))
+                : convertedFiles;
+            selectedMdPaths = visible.map(f => f.relPath);
+            renderMdList();
+            updateRunBtn();
+        });
+        document.getElementById('mdClearAll').addEventListener('click', () => {
+            selectedMdPaths = [];
+            renderMdList();
+            updateRunBtn();
+        });
+
+        // 출력 방식 또는 작업 유형 변경 시 UI 업데이트
         function updateOutputType() {
             const outputType = document.querySelector('input[name="outputType"]:checked').value;
+            const taskType = document.querySelector('input[name="taskType"]:checked').value;
+            const taskLabels = { qna: 'Q&A', summary: '요약', convert: '원문 변환', deck: '덱' };
+            const taskLabel = taskLabels[taskType] || 'Q&A';
+            const isDeck = taskType === 'deck';
+            const fileLabel = isDeck ? 'JSON 파일' : 'MD 파일';
             const notionGroup = document.getElementById('notionGroup');
             const mdDirGroup = document.getElementById('mdDirGroup');
             const step2Label = document.getElementById('step2Label');
+            const mdDirTitle = document.querySelector('#mdDirGroup .title');
+            // 출력 방식 버튼 라벨 갱신
+            document.querySelector('label[for="outputMd"]').textContent = fileLabel;
+            if (mdDirTitle) mdDirTitle.textContent = isDeck ? '출력 디렉토리' : 'MD 출력 디렉토리';
             if (outputType === 'md') {
                 notionGroup.style.display = 'none';
                 mdDirGroup.style.display = 'block';
-                step2Label.textContent = 'Q&A 생성 + MD 파일 저장 (병렬)';
+                step2Label.textContent = taskLabel + ' 생성 + ' + fileLabel + ' 저장 (병렬)';
             } else if (outputType === 'both') {
                 notionGroup.style.display = 'block';
                 mdDirGroup.style.display = 'block';
-                step2Label.textContent = 'Q&A 생성 + Notion 업로드 + MD 파일 저장 (병렬)';
+                step2Label.textContent = taskLabel + ' 생성 + Notion 업로드 + ' + fileLabel + ' 저장 (병렬)';
             } else {
                 notionGroup.style.display = 'block';
                 mdDirGroup.style.display = 'none';
-                step2Label.textContent = 'Q&A 생성 + Notion 업로드 (병렬)';
+                step2Label.textContent = taskLabel + ' 생성 + Notion 업로드 (병렬)';
             }
             updateRunBtn();
         }
         document.querySelectorAll('input[name="outputType"]').forEach(radio => {
+            radio.addEventListener('change', updateOutputType);
+        });
+        document.querySelectorAll('input[name="taskType"]').forEach(radio => {
             radio.addEventListener('change', updateOutputType);
         });
 
@@ -630,11 +972,13 @@
         }
 
         function updateRunBtn() {
-            const hasFile = selectedFiles.length > 0;
+            const hasInput = isMdMode()
+                ? selectedMdPaths.length > 0
+                : selectedFiles.length > 0;
             const outputType = document.querySelector('input[name="outputType"]:checked').value;
             const needsNotion = outputType === 'notion' || outputType === 'both';
             const hasNotion = document.getElementById('notionUrl').value.trim() !== '';
-            runBtn.disabled = !(hasFile && (!needsNotion || hasNotion));
+            runBtn.disabled = !(hasInput && (!needsNotion || hasNotion));
         }
 
         document.getElementById('notionUrl').addEventListener('input', updateRunBtn);
@@ -754,7 +1098,12 @@
 
         // Run
         runBtn.addEventListener('click', async () => {
-            if (selectedFiles.length === 0) return;
+            const mdMode = isMdMode();
+            if (mdMode) {
+                if (selectedMdPaths.length === 0) return;
+            } else {
+                if (selectedFiles.length === 0) return;
+            }
 
             runBtn.disabled = true;
             runBtn.classList.add('running');
@@ -774,16 +1123,25 @@
 
             const mode = document.querySelector('input[name="mode"]:checked').value;
             const outputType = document.querySelector('input[name="outputType"]:checked').value;
+            const taskType = document.querySelector('input[name="taskType"]:checked').value;
             const notionUrl = document.getElementById('notionUrl').value;
 
             const formData = new FormData();
-            for (const file of selectedFiles) {
-                formData.append('file', file);
+            formData.append('inputMode', mdMode ? 'md' : 'pdf');
+            if (mdMode) {
+                for (const rp of selectedMdPaths) {
+                    formData.append('mdPaths', rp);
+                }
+            } else {
+                for (const file of selectedFiles) {
+                    formData.append('file', file);
+                }
             }
             const mdOutDir = document.getElementById('mdOutDir').value.trim();
 
             formData.append('mode', mode);
             formData.append('outputType', outputType);
+            formData.append('taskType', taskType);
             formData.append('notionUrl', notionUrl);
             if (mdOutDir) {
                 formData.append('mdOutDir', mdOutDir);
@@ -843,7 +1201,8 @@
                         a.className = 'download-item';
                         a.href = `/api/download?path=${encodeURIComponent(file.path)}`;
                         a.download = file.name;
-                        a.innerHTML = `<span class="dl-icon">&#8595;</span><span class="dl-name">${file.name}</span><span class="dl-badge">MD</span>`;
+                        const badge = file.name.endsWith('.json') ? 'JSON' : 'MD';
+                        a.innerHTML = `<span class="dl-icon">&#8595;</span><span class="dl-name">${file.name}</span><span class="dl-badge">${badge}</span>`;
                         downloadList.appendChild(a);
                     }
                     document.getElementById('downloadSection').classList.add('visible');
@@ -863,6 +1222,11 @@
             fileInput.value = '';
             fileName.textContent = '';
             dropZone.classList.remove('has-file');
+            selectedMdPaths = [];
+            if (isMdMode()) {
+                // 결과로 새 파일이 생겼을 수 있으니 갱신
+                loadConvertedFiles();
+            }
             runBtn.disabled = true;
         }
     </script>

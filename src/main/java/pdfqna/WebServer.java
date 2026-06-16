@@ -24,7 +24,17 @@ public class WebServer {
         boolean useMd = false;
         String mode = "split";
         String mdOutDir = null;
+        String taskType = "qna";
         final List<String> pdfBasenames = new ArrayList<>();
+        final List<String> categories = new ArrayList<>(); // pdfBasenames와 평행. 카테고리 없으면 빈 문자열
+    }
+
+    private static Path sourceRoot() {
+        return Paths.get(SCRIPT_DIR, "source");
+    }
+
+    private static Path resultRoot() {
+        return Paths.get(SCRIPT_DIR, "result");
     }
 
     public static void main(String[] args) {
@@ -41,18 +51,73 @@ public class WebServer {
         app.get("/api/output/{jobId}", WebServer::handleOutput);
         app.get("/api/files/{jobId}", WebServer::handleFiles);
         app.get("/api/download", WebServer::handleDownload);
+        app.get("/api/converted", WebServer::handleConverted);
+    }
+
+    private static void handleConverted(Context ctx) {
+        Path root = sourceRoot().toAbsolutePath().normalize();
+        List<Map<String, Object>> files = new ArrayList<>();
+        if (Files.isDirectory(root)) {
+            try (var stream = Files.walk(root)) {
+                stream.filter(Files::isRegularFile)
+                      .filter(p -> p.getFileName().toString().toLowerCase().endsWith(".md"))
+                      .forEach(p -> {
+                          Map<String, Object> entry = new HashMap<>();
+                          String fname = p.getFileName().toString();
+                          Path rel = root.relativize(p);
+                          Path parent = rel.getParent();
+                          String category = parent == null ? "" : parent.toString();
+                          entry.put("name", fname);
+                          entry.put("relPath", rel.toString());
+                          entry.put("category", category);
+                          try {
+                              entry.put("size", Files.size(p));
+                              entry.put("modified", Files.getLastModifiedTime(p).toMillis());
+                          } catch (IOException ignored) {
+                              entry.put("size", 0);
+                              entry.put("modified", 0);
+                          }
+                          files.add(entry);
+                      });
+            } catch (IOException e) {
+                ctx.status(500).json(Map.of("error", e.getMessage()));
+                return;
+            }
+        }
+        // 카테고리(미분류 먼저) → 이름 순 정렬
+        files.sort((a, b) -> {
+            String ca = (String) a.get("category");
+            String cb = (String) b.get("category");
+            int cmp = ca.compareTo(cb);
+            if (cmp != 0) return cmp;
+            return ((String) a.get("name")).compareTo((String) b.get("name"));
+        });
+        ctx.json(Map.of("files", files));
     }
 
     private static void handleRun(Context ctx) {
         try {
-            List<UploadedFile> uploadedFiles = ctx.uploadedFiles("file");
+            String inputMode = ctx.formParam("inputMode"); // "pdf" (default) or "md"
+            if (inputMode == null || inputMode.isBlank()) {
+                inputMode = "pdf";
+            }
+            boolean fromMd = "md".equals(inputMode);
+
+            List<UploadedFile> uploadedFiles = fromMd ? List.of() : ctx.uploadedFiles("file");
+            List<String> mdPathsParam = fromMd ? ctx.formParams("mdPaths") : List.of();
+
             String mode = ctx.formParam("mode");
             String notionUrl = ctx.formParam("notionUrl");
             String outputType = ctx.formParam("outputType"); // "notion", "md", "both"
             String mdOutDir = ctx.formParam("mdOutDir");
+            String taskType = ctx.formParam("taskType"); // "qna" or "summary"
 
-            if (uploadedFiles.isEmpty()) {
+            if (!fromMd && uploadedFiles.isEmpty()) {
                 ctx.status(400).json(Map.of("error", "PDF 파일을 업로드해주세요."));
+                return;
+            }
+            if (fromMd && mdPathsParam.isEmpty()) {
+                ctx.status(400).json(Map.of("error", "사용할 MD 파일을 선택해주세요."));
                 return;
             }
 
@@ -68,13 +133,48 @@ public class WebServer {
                 return;
             }
 
-            Path tempDir = Files.createTempDirectory("pdf-qna-");
+            List<Path> inputPaths = new ArrayList<>();
+            List<String> basenames = new ArrayList<>();
+            Path tempDir = null;
             List<Path> tempFiles = new ArrayList<>();
 
-            for (UploadedFile uf : uploadedFiles) {
-                Path tempFile = tempDir.resolve(uf.filename());
-                Files.copy(uf.content(), tempFile, StandardCopyOption.REPLACE_EXISTING);
-                tempFiles.add(tempFile);
+            List<String> categories = new ArrayList<>();
+            if (fromMd) {
+                Path root = sourceRoot().toAbsolutePath().normalize();
+                for (String raw : mdPathsParam) {
+                    if (raw == null || raw.isBlank()) continue;
+                    String relPath = raw.endsWith(".md") ? raw : raw + ".md";
+                    Path resolved = root.resolve(relPath).normalize();
+                    if (!resolved.startsWith(root)) {
+                        ctx.status(400).json(Map.of("error", "잘못된 파일 경로: " + raw));
+                        return;
+                    }
+                    if (!Files.isRegularFile(resolved)) {
+                        ctx.status(404).json(Map.of("error", "파일을 찾을 수 없습니다: " + relPath));
+                        return;
+                    }
+                    inputPaths.add(resolved);
+                    String fname = resolved.getFileName().toString();
+                    String base = fname.substring(0, fname.length() - 3);
+                    basenames.add(base);
+                    Path rel = root.relativize(resolved);
+                    Path parent = rel.getParent();
+                    categories.add(parent == null ? "" : parent.toString());
+                }
+            } else {
+                tempDir = Files.createTempDirectory("pdf-qna-");
+                for (UploadedFile uf : uploadedFiles) {
+                    Path tempFile = tempDir.resolve(uf.filename());
+                    Files.copy(uf.content(), tempFile, StandardCopyOption.REPLACE_EXISTING);
+                    tempFiles.add(tempFile);
+                    inputPaths.add(tempFile);
+                    String name = uf.filename();
+                    if (name.toLowerCase().endsWith(".pdf")) {
+                        name = name.substring(0, name.length() - 4);
+                    }
+                    basenames.add(name);
+                    categories.add(""); // PDF 업로드는 카테고리 없음
+                }
             }
 
             List<String> cmd = new ArrayList<>();
@@ -83,6 +183,16 @@ public class WebServer {
 
             if ("single".equals(mode)) {
                 cmd.add("--single");
+            }
+            if ("summary".equals(taskType)) {
+                cmd.add("--summary");
+            } else if ("convert".equals(taskType)) {
+                cmd.add("--convert");
+            } else if ("deck".equals(taskType)) {
+                cmd.add("--deck");
+            }
+            if (fromMd) {
+                cmd.add("--from-md");
             }
             if (useNotion) {
                 cmd.add("--notion");
@@ -96,23 +206,22 @@ public class WebServer {
                 }
             }
 
-            for (Path tf : tempFiles) {
-                cmd.add(tf.toString());
+            for (Path p : inputPaths) {
+                cmd.add(p.toString());
             }
 
             String jobId = UUID.randomUUID().toString().substring(0, 8);
             JobState state = new JobState();
             state.useMd = useMd;
             state.mode = mode != null ? mode : "split";
+            state.taskType = taskType != null ? taskType : "qna";
             state.mdOutDir = (mdOutDir != null && !mdOutDir.isBlank()) ? mdOutDir : null;
-            for (UploadedFile uf : uploadedFiles) {
-                String name = uf.filename();
-                if (name.toLowerCase().endsWith(".pdf")) {
-                    name = name.substring(0, name.length() - 4);
-                }
-                state.pdfBasenames.add(name);
-            }
+            state.pdfBasenames.addAll(basenames);
+            state.categories.addAll(categories);
             jobs.put(jobId, state);
+
+            final Path finalTempDir = tempDir;
+            final List<Path> finalTempFiles = tempFiles;
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.directory(new File(SCRIPT_DIR));
@@ -131,12 +240,14 @@ public class WebServer {
                     state.output.append("\n오류: ").append(e.getMessage()).append("\n");
                 } finally {
                     state.done = true;
-                    try {
-                        for (Path tf : tempFiles) {
-                            Files.deleteIfExists(tf);
+                    if (finalTempDir != null) {
+                        try {
+                            for (Path tf : finalTempFiles) {
+                                Files.deleteIfExists(tf);
+                            }
+                            Files.deleteIfExists(finalTempDir);
+                        } catch (IOException ignored) {
                         }
-                        Files.deleteIfExists(tempDir);
-                    } catch (IOException ignored) {
                     }
                 }
             }).start();
@@ -180,18 +291,24 @@ public class WebServer {
         }
 
         List<Map<String, String>> files = new ArrayList<>();
+        Path resultRoot = resultRoot().resolve(state.taskType);
 
-        for (String basename : state.pdfBasenames) {
+        for (int i = 0; i < state.pdfBasenames.size(); i++) {
+            String basename = state.pdfBasenames.get(i);
+            String category = i < state.categories.size() ? state.categories.get(i) : "";
             Path qnaDir;
             if (state.mdOutDir != null) {
                 qnaDir = Paths.get(state.mdOutDir);
+            } else if (category != null && !category.isEmpty()) {
+                qnaDir = resultRoot.resolve(category).resolve(basename);
             } else {
-                qnaDir = Paths.get(SCRIPT_DIR, "out", basename + "_qna");
+                qnaDir = resultRoot.resolve(basename);
             }
             if (Files.isDirectory(qnaDir)) {
                 try (var stream = Files.list(qnaDir)) {
                     Path baseDir = qnaDir;
-                    stream.filter(p -> p.toString().endsWith(".md"))
+                    String fileExt = "deck".equals(state.taskType) ? ".json" : ".md";
+                    stream.filter(p -> p.toString().endsWith(fileExt))
                           .sorted()
                           .forEach(p -> files.add(Map.of(
                                   "name", p.getFileName().toString(),
@@ -220,9 +337,10 @@ public class WebServer {
             resolved = Paths.get(SCRIPT_DIR).resolve(filePath).normalize();
         }
 
-        // .md 파일만 허용
-        if (!resolved.toString().endsWith(".md")) {
-            ctx.status(403).result("마크다운 파일만 다운로드할 수 있습니다.");
+        // .md 또는 .json 파일만 허용
+        String fileName = resolved.toString();
+        if (!fileName.endsWith(".md") && !fileName.endsWith(".json")) {
+            ctx.status(403).result("마크다운 또는 JSON 파일만 다운로드할 수 있습니다.");
             return;
         }
 
@@ -231,7 +349,8 @@ public class WebServer {
             return;
         }
 
-        ctx.header("Content-Type", "text/markdown; charset=utf-8");
+        String contentType = fileName.endsWith(".json") ? "application/json; charset=utf-8" : "text/markdown; charset=utf-8";
+        ctx.header("Content-Type", contentType);
         ctx.header("Content-Disposition", "attachment; filename=\"" + resolved.getFileName() + "\"");
         try {
             ctx.result(Files.newInputStream(resolved));
